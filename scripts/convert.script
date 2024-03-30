@@ -1,0 +1,13 @@
+#!/bin/bash
+cd $1
+for file in *.pnm; 
+do 
+    echo "Converting $file..."
+    convert $file -deskew 40% $file.jpg;
+done
+echo "Creating $2..."
+convert $(ls *.jpg -1v | paste) -compress jpeg -page A4 $2
+chown 1000:1000 $2
+mv $2 /home/paperless/consume
+echo $2 was sent successfully to paperless!
+rm -dr $1

@@ -1,0 +1,32 @@
+#!/bin/bash
+
+FOLDER_PATH="/home/paperless/scan/output_$(date -d "today" +"%Y_%m_%d-%H_%M_%S")"
+PDF_NAME="output_$(date -d "today" +"%Y_%m_%d-%H_%M_%S").pdf"
+
+logger -t "scanbd: $0" "Begin of $SCANBD_ACTION for device $SCANBD_DEVICE"
+
+mkdir $FOLDER_PATH
+cd $FOLDER_PATH
+
+scanimage --source="ADF Duplex" --mode=Color --resolution=300 --batch='out%d.pnm' --swskip 20 \
+    --page-width 210 --page-height 297 -x 210 -y 297 
+
+EXITCODE=$?
+
+if [ $EXITCODE -eq 0 ]; then
+    /etc/scanbd/scripts/convert.script ${FOLDER_PATH} $PDF_NAME &
+else
+    rm -dr $FOLDER_PATH
+fi
+
+if [ $EXITCODE -eq 0 ]; then
+    echo "Scan successful!"
+elif [ $EXITCODE -eq 6 ]; then
+    echo "Scanner jammed!"
+elif [ $EXITCODE -eq 7 ]; then
+    echo "Out of documents!"
+else
+    echo "scanimage command failed with exit status $EXITCODE"
+fi
+
+logger -t "scanbd: $0" "End   of $SCANBD_ACTION for device $SCANBD_DEVICE"

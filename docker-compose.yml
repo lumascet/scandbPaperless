@@ -1,0 +1,66 @@
+version: "3.4"
+services:
+  broker:
+    image: docker.io/library/redis:7
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  db:
+    image: docker.io/library/postgres:13
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: paperless
+
+  paperless:
+    hostname: scannerless
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    restart: unless-stopped
+    user: '1000:1000'
+    depends_on:
+      - db
+      - broker
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-S", "--max-time", "2", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - data:/usr/src/paperless/data
+      - ./media:/usr/src/paperless/media
+      - ./export:/usr/src/paperless/export
+      - consume:/usr/src/paperless/consume
+    env_file: docker-compose.env
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBHOST: db
+    networks:
+      - default
+      - netstackbridge
+
+  scanbd:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - consume:/home/paperless/consume
+      - ./scripts:/etc/scanbd/scripts
+      - ./scanbd/run.sh:/run.sh
+      - ./scanbd/scanbd.conf:/etc/scanbd/scanbd.conf
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+
+volumes:
+  data:
+  pgdata:
+  redisdata:
+  consume:
+
+networks:
+  default:
+  netstackbridge:
+    external:
+      name: netstack_bridge
