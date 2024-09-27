@@ -2,3 +2,4 @@ docker-compose.env
 **.pdf
 **.webp
 media/*.lock
+.env

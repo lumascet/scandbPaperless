@@ -1,4 +1,3 @@
-version: "3.4"
 services:
   broker:
     image: docker.io/library/redis:7
@@ -16,7 +15,7 @@ services:
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: paperless
 
-  paperless:
+  scannerless:
     hostname: scannerless
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     restart: unless-stopped
@@ -34,13 +33,65 @@ services:
       - ./media:/usr/src/paperless/media
       - ./export:/usr/src/paperless/export
       - consume:/usr/src/paperless/consume
-    env_file: docker-compose.env
+      - backup:/usr/src/paperless/backup
     environment:
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY}
+      PAPERLESS_TRUSTED_PROXIES: ${PAPERLESS_TRUSTED_PROXIES}
+      PAPERLESS_USE_X_FORWARD_PORT: True
+      PAPERLESS_TIME_ZONE: ${PAPERLESS_TIME_ZONE}
+      PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE}
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      PAPERLESS_URL: ${PAPERLESS_URL}
       PAPERLESS_REDIS: redis://broker:6379
       PAPERLESS_DBHOST: db
+      PAPERLESS_OCR_USER_ARGS: '{"invalidate_digital_signatures": true}'
+      #PAPERLESS_EMAIL_TASK_CRON: '*/1 * * * *'
     networks:
       - default
       - netstackbridge
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.scannerless.schedule:  "0 0 4 * * WED"
+      ofelia.job-exec.scannerless.user: "paperless"
+      ofelia.job-exec.scannerless.command: "document_exporter ../backup/ -f"
+
+  backup:
+    image: adrienpoupa/rclone-backup:latest
+    environment:
+      RCLONE_REMOTE_NAME: 'RcloneBackup'
+      RCLONE_REMOTE_DIR: ${RCLONE_REMOTE_DIR}
+    #   RCLONE_GLOBAL_FLAG: ''
+      CRON: '0 5 * * WED'
+      BACKUP_FOLDER_NAME: 'paperless'
+      BACKUP_FOLDER_PATH: '/backup'
+    #   DB_TYPE: 'sqlite'
+    #   SQLITE_DATABASE: '/database/database.sqlite'
+      ZIP_ENABLE: 'TRUE'
+      ZIP_PASSWORD: ${RCLONE_BACKUP_ENCRYPTION_PASSWORD}
+      ZIP_TYPE: '7z'
+      BACKUP_FILE_SUFFIX: '%Y-%m-%d_%H-%M-%S'
+      BACKUP_KEEP_DAYS: 30
+    #   PING_URL: ''
+    #   MAIL_SMTP_ENABLE: 'FALSE'
+    #   MAIL_SMTP_VARIABLES: ''
+    #   MAIL_TO: ''
+    #   MAIL_WHEN_SUCCESS: 'TRUE'
+    #   MAIL_WHEN_FAILURE: 'TRUE'
+      TIMEZONE: 'Europe/Vienna'
+    volumes:
+      - ~/.config/rclone:/config/rclone
+      - backup:/backup
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: daemon --docker
+    depends_on:
+      scannerless:
+        condition: service_healthy
+    restart: unless-stopped
 
   scanbd:
     build: .
@@ -55,6 +106,7 @@ services:
 
 volumes:
   data:
+  backup:
   pgdata:
   redisdata:
   consume:
@@ -62,5 +114,5 @@ volumes:
 networks:
   default:
   netstackbridge:
-    external:
-      name: netstack_bridge
+    external: true
+    name: netstack_bridge
