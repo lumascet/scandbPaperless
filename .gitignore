@@ -1,4 +1,6 @@
 docker-compose.env
+config.py
+__pycache__/
 **.pdf
 **.webp
 media/*.lock

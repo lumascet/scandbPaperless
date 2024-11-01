@@ -1,15 +1,87 @@
 #!/bin/bash
 
+# Script for performing different types of scans.
+# Usage: ./scan.sh [scan_type]
+
+# Available scan types:
+# - color_a4
+# - greyscale_a4
+# - color_autosize
+# - greyscale_autosize
+# - single_doc_a4_color
+# - single_doc_a4_greyscale
+
+echo "Current working directory: $(pwd)"
+
+SCAN_TYPE=$1
+
+# Set default values for scan parameters
+SOURCE="ADF Duplex"
+MODE="Color"
+RESOLUTION=300
+PAGE_WIDTH=210
+PAGE_HEIGHT=297
+BATCHCOUNT=0
+BATCH="out%d.pnm"
+
+MAX_PAGE_WIDTH=221.121 
+MAX_PAGE_HEIGHT=876.695
+
+# if none selected, default to color_a4
+if [ -z "$SCAN_TYPE" ]; then
+    SCAN_TYPE="color_a4"
+fi
+
+# Adjust parameters based on scan type
+case "$SCAN_TYPE" in
+    color_a4)
+        MODE="Color"
+        PAGE_WIDTH=210
+        PAGE_HEIGHT=297
+        ;;
+    greyscale_a4)
+        MODE="Gray"
+        PAGE_WIDTH=210
+        PAGE_HEIGHT=297
+        ;;
+    color_autosize)
+        MODE="Color"
+        PAGE_WIDTH=$MAX_PAGE_WIDTH
+        PAGE_HEIGHT=$MAX_PAGE_HEIGHT
+        ;;
+    greyscale_autosize)
+        MODE="Gray"
+        PAGE_WIDTH=$MAX_PAGE_WIDTH
+        PAGE_HEIGHT=$MAX_PAGE_HEIGHT
+        ;;
+    single_page_a4_color)
+        MODE="Color"
+        PAGE_WIDTH=210
+        PAGE_HEIGHT=297
+        BATCHCOUNT=1
+        ;;
+    single_page_a4_greyscale)
+        MODE="Gray"
+        PAGE_WIDTH=210
+        PAGE_HEIGHT=297
+        BATCHCOUNT=1
+        ;;
+esac
+
+# Define folder and PDF name
 FOLDER_PATH="/home/paperless/scan/output_$(date -d "today" +"%Y_%m_%d-%H_%M_%S")"
 PDF_NAME="output_$(date -d "today" +"%Y_%m_%d-%H_%M_%S").pdf"
 
-logger -t "scanbd: $0" "Begin of $SCANBD_ACTION for device $SCANBD_DEVICE"
+logger -t "scanbd: $0" "Begin of $SCANBD_ACTION for device $SCANBD_DEVICE with scan type $SCAN_TYPE"
 
-mkdir $FOLDER_PATH
+mkdir -p $FOLDER_PATH
 cd $FOLDER_PATH
 
-scanimage --source="ADF Duplex" --mode=Color --resolution=300 --batch='out%d.pnm' --swskip 20 \
-    --page-width 210 --page-height 297 -x 210 -y 297 
+echo "scanimage --source="$SOURCE" --mode="$MODE" --resolution=$RESOLUTION --batch=$BATCH --batch-count=$BATCHCOUNT --swskip 20 --page-width=$PAGE_WIDTH --page-height=$PAGE_HEIGHT -x $PAGE_WIDTH -y $PAGE_HEIGHT --format=pnm"
+
+# Run scanimage with the appropriate parameters
+scanimage --source="$SOURCE" --mode="$MODE" --resolution=$RESOLUTION --batch=$BATCH --batch-count=$BATCHCOUNT --swskip 20 \
+    --page-width=$PAGE_WIDTH --page-height=$PAGE_HEIGHT -x $PAGE_WIDTH -y $PAGE_HEIGHT --format=pnm
 
 EXITCODE=$?
 
@@ -19,6 +91,7 @@ else
     rm -dr $FOLDER_PATH
 fi
 
+# Handle different exit codes for feedback
 if [ $EXITCODE -eq 0 ]; then
     echo "Scan successful!"
 elif [ $EXITCODE -eq 6 ]; then
@@ -29,4 +102,6 @@ else
     echo "scanimage command failed with exit status $EXITCODE"
 fi
 
-logger -t "scanbd: $0" "End   of $SCANBD_ACTION for device $SCANBD_DEVICE"
+logger -t "scanbd: $0" "End of $SCANBD_ACTION for device $SCANBD_DEVICE with scan type $SCAN_TYPE"
+
+exit $EXITCODE

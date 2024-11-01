@@ -1,15 +1,8 @@
-FROM python:3.12.2-slim-bullseye
+FROM python:3.13-slim-bullseye
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential wget \
-    && wget https://imagemagick.org/archive/ImageMagick.tar.gz \
-    && tar xvzf ImageMagick.tar.gz \
-    && cd ImageMagick* \
-    && ./configure && make -j 4 && make install && ldconfig /usr/local/lib \
-    && cd .. && rm -dr ImageMagick* \
-    && apt-get remove build-essential wget -y && apt-get autoremove -y \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends\
+    imagemagick\
+    img2pdf \
     sane \
     sane-utils \
     usbutils \
@@ -32,8 +25,14 @@ RUN echo "Setting up user/group" \
 RUN mkdir /home/paperless /home/paperless/scan && chown paperless:paperless /home/paperless/scan
 
 COPY scanbd/scanbd.conf /etc/scanbd/scanbd.conf
-COPY scanbd/run.sh /run.sh
-
+COPY requirements.txt /requirements.txt
+RUN pip install -r /requirements.txt
+#COPY scanbd/run.sh /run.sh
+COPY scripts /etc/scanbd/scripts
+COPY scanbd/config.py /config.py
+COPY scanbd/homeassistantmqtt.py /homeassistantmqtt.py
+COPY scanbd/run.py /run.py
 HEALTHCHECK --interval=30s --timeout=30s --start-period=1s --retries=3 CMD [ "pgrep", "-x", "scanbd" ]
 
-ENTRYPOINT [ "/run.sh"]
+#ENTRYPOINT [ "/run.sh"]
+ENTRYPOINT [ "python3","-u", "run.py", "-f", "data.json" ]

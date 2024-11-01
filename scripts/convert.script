@@ -2,12 +2,21 @@
 cd $1
 for file in *.pnm; 
 do 
-    echo "Converting $file..."
-    convert $file -deskew 40% $file.jpg;
+    jpg_file="${file%.pnm}.jpg"
+    echo "Converting $file to $jpg_file..."
+    border_color=$(convert "$file" -resize 1x1\! txt:- | tail -n 1 | cut -d ' ' -f 4)
+    convert "$file" -background "$border_color" -deskew 40% -fuzz 20% -trim +repage -quality 80% "$jpg_file"
+    #rm $file
+    # Check if the conversion succeeded
+    if [ $? -eq 0 ]; then
+        echo "$file successfully converted to $jpg_file"
+    else
+        echo "Failed to convert $file to JPEG"
+    fi
 done
 echo "Creating $2..."
-convert $(ls *.jpg -1v | paste) -compress jpeg -page A4 $2
+img2pdf $(ls *.jpg -1v) -o $2
 chown 1000:1000 $2
-mv $2 /home/paperless/consume
+#mv $2 /home/paperless/consume
 echo $2 was sent successfully to paperless!
-rm -dr $1
+#rm -dr $1
