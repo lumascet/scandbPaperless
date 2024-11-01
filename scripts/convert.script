@@ -4,10 +4,8 @@ for file in *.pnm;
 do 
     jpg_file="${file%.pnm}.jpg"
     echo "Converting $file to $jpg_file..."
-    border_color=$(convert "$file" -resize 1x1\! txt:- | tail -n 1 | cut -d ' ' -f 4)
-    convert "$file" -background "$border_color" -deskew 40% -fuzz 30% -trim +repage -quality 80% "$jpg_file"
-    #rm $file
-    # Check if the conversion succeeded
+    border_color=$(convert "$file" -resize 100x1! \( +clone -crop 1x1+0+0 \) +append -crop 2x1+99+0 -resize 1x1 txt:- | tail -1 | cut -d ' ' -f 4)
+    convert "$file" -background "$border_color" -deskew 40% -fuzz 10% -trim +repage -quality 80% "$jpg_file"
     if [ $? -eq 0 ]; then
         echo "$file successfully converted to $jpg_file"
     else

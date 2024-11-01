@@ -157,11 +157,11 @@ def main():
         return callback
 
     # Register callbacks for each entity
-    for button in scan_buttons.values():
+    for key, button in scan_buttons.items():
         mqtt_handler.register_entity_callback(
             device,
             button,
-            make_scan_callback(button.name)
+            make_scan_callback(key)
         )
 
     # Monitor scanner status
