@@ -34,5 +34,4 @@ COPY scanbd/homeassistantmqtt.py /homeassistantmqtt.py
 COPY scanbd/run.py /run.py
 HEALTHCHECK --interval=30s --timeout=30s --start-period=1s --retries=3 CMD [ "pgrep", "-x", "scanbd" ]
 
-#ENTRYPOINT [ "/run.sh"]
-ENTRYPOINT [ "python3","-u", "run.py", "-f", "data.json" ]
+ENTRYPOINT [ "python3","-u", "run.py" ]

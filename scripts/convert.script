@@ -5,7 +5,7 @@ do
     jpg_file="${file%.pnm}.jpg"
     echo "Converting $file to $jpg_file..."
     border_color=$(convert "$file" -resize 1x1\! txt:- | tail -n 1 | cut -d ' ' -f 4)
-    convert "$file" -background "$border_color" -deskew 40% -fuzz 20% -trim +repage -quality 80% "$jpg_file"
+    convert "$file" -background "$border_color" -deskew 40% -fuzz 30% -trim +repage -quality 80% "$jpg_file"
     #rm $file
     # Check if the conversion succeeded
     if [ $? -eq 0 ]; then
@@ -17,6 +17,6 @@ done
 echo "Creating $2..."
 img2pdf $(ls *.jpg -1v) -o $2
 chown 1000:1000 $2
-#mv $2 /home/paperless/consume
+mv $2 /home/paperless/consume
 echo $2 was sent successfully to paperless!
-#rm -dr $1
+rm -dr $1
