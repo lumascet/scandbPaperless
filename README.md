@@ -13,7 +13,7 @@ The script will auto-register a device to the Homeassistant MQTT integration.
 There is also an automated backup solution to backup your Paperless instance.
 
 > [!WARNING]
-> I was not able to get the system to communicate with the scanner as a non-root user, so I set the Docker container to use the root user. If you know how to properly set the permissions, consider supporting!
+> I was not able to get the system to communicate with the scanner as a non-root user, so I set the Docker container to use the root user. If you know how to properly set the permissions, consider contributing!
 
 > [!NOTE]
 > When the scanner is plugged in while the container is running, the Python script will exit, forcing a restart of the Docker container. This is needed to reconnect the container to the scanner as I could not figure out how to auto-connect to a running container.
@@ -22,8 +22,9 @@ There is also an automated backup solution to backup your Paperless instance.
 
 1. Create a `config.py` using `config_example.py` as a template
 2. Create a `.env` using the `.env_example` as a template
-3. Edit `docker-compose.yml`
-4. Run `docker compose up -d`
+3. Edit `scanbd/scanbd.conf` to make quick scans using the hardware button(s)
+4. Edit `docker-compose.yml`
+5. Run `docker compose up -d`
 
 ## Preview
 
