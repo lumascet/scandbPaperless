@@ -1,1 +1,3 @@
 paho-mqtt
+pdf2image
+pillow

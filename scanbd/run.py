@@ -1,8 +1,14 @@
+import math
+import os
 from config import *
 import time
 import subprocess
-from homeassistantmqtt import BinarySensor, Button, HomeAssistantDevice, MQTTHandler, Sensor
+from homeassistantmqtt import BinarySensor, Button, HomeAssistantDevice, MQTTHandler, Sensor, Image as ImageEntity
 import logging
+from pdf2image import convert_from_path
+from PIL import Image
+from io import BytesIO
+import threading
 
 # Constants for the scanner device
 DEVICE_USB_ID = "04c5:11a2"
@@ -18,6 +24,7 @@ PROCESS_NAME = "scanbd"
 SCANBD_COMMAND = "/usr/sbin/scanbd -f -d -c /etc/scanbd/scanbd.conf"
 SCAN_SCRIPT_PATH = "/etc/scanbd/scripts"
 SCAN_SCRIPT = "./scan.script"
+PDF_PATH = "/home/paperless/last.pdf"
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -38,18 +45,18 @@ def poll_scanner():
 def start_scanbd():
     if not is_process_running(PROCESS_NAME):
         subprocess.Popen(SCANBD_COMMAND.split())
-        print("Scanner service started.")
+        logger.info("Scanner service started.")
         return True
-    print("Scanner service already running.")
+    logger.info("Scanner service already running.")
     return False
 
 
 def stop_scanbd():
     if is_process_running(PROCESS_NAME):
         subprocess.run(['pkill', PROCESS_NAME])
-        print("Scanner service stopped.")
+        logger.info("Scanner service stopped.")
         return True
-    print("Scanner service not running.")
+    logger.info("Scanner service not running.")
     return False
 
 
@@ -70,8 +77,8 @@ def perform_scan(scan_type):
             text=True,
             cwd=SCAN_SCRIPT_PATH
         )
-        print(result.stdout)
-        print(result.stderr)
+        logger.info(result.stdout)
+        logger.error(result.stderr)
         start_scanbd()
         if result.returncode == 0:
             return "Scan successful"
@@ -101,13 +108,14 @@ def main():
     program_exit = False
     was_device_connected = True
     scanning = False
+    last_pdf_time = 0
 
     # MQTT broker settings from config
     MQTT_BROKER = mqtt_server_host
     MQTT_PORT = mqtt_server_port
     MQTT_USER = mqtt_username
     MQTT_PASSWORD = mqtt_password
-    MQTT_KEEPALIVE = 300
+    MQTT_KEEPALIVE = mqtt_keepalive
 
     # Initialize the device using properties from the top
     device = HomeAssistantDevice(
@@ -119,6 +127,16 @@ def main():
         configuration_url=CONFIGURATION_URL
     )
 
+    entities = {
+        "restart_docker": Button("Restart Docker", icon="mdi:restart", entity_category="diagnostic"),
+        "scanner_status": Sensor("Scanner Status", icon="mdi:printer-alert"),
+        "scanner_online": BinarySensor("Scanner Online", icon="mdi:printer-check"),
+        "scanner_preview": ImageEntity("Scanner Preview", "image/jpeg", icon="mdi:image")
+    }
+
+    for entity in entities.values():
+        device.add_entity(entity)
+
     # Create entities without passing the device
     scan_buttons = {
         "color_a4": Button("A4 Color", icon="mdi:palette"),
@@ -129,18 +147,15 @@ def main():
         "single_page_a4_greyscale": Button("Single Page A4 Greyscale", icon="mdi:file"),
     }
 
-    entities = {
-        "restart_docker": Button("Restart Docker", icon="mdi:restart", entity_category="diagnostic"),
-        "scanner_status": Sensor("Scanner Status", icon="mdi:printer-alert"),
-        "scanner_online": BinarySensor("Scanner Online", icon="mdi:printer-check"),
-    }
-
-    # Add entities to the device
     for button in scan_buttons.values():
+        availability = {
+            "topic": entities["scanner_online"].get_state_topic(),
+            "payload_available": "ON",
+            "payload_not_available": "OFF",
+            "value_template": "{{ value_json.state }}"
+        }
+        button.add_availability(availability)
         device.add_entity(button)
-
-    for entity in entities.values():
-        device.add_entity(entity)
 
     # Initialize MQTT handler and register device
     mqtt_handler = MQTTHandler(
@@ -152,12 +167,9 @@ def main():
     )
 
     mqtt_handler.register_device(device)
-    mqtt_handler.connect()
-    mqtt_handler.publish_ha_autoconfig(device)
-    mqtt_handler.set_device_online(device)
 
-    def restart_docker(payload):
-        print("Restarting Docker")
+    def restart_docker(client=None, userdata=None, message=None):
+        logger.info("Restarting Docker")
         nonlocal program_exit
         program_exit = True
 
@@ -167,17 +179,28 @@ def main():
         restart_docker
     )
 
+    mqtt_handler.connect()
+    mqtt_handler.publish_ha_autoconfig(device)
+    mqtt_handler.set_device_online(device)
+
     # Define the scan callback function
     def make_scan_callback(scan_type):
-        def callback(payload):
-            print(f"Received '{payload}' for '{scan_type}'")
-            nonlocal scanning
-            scanning = True
-            scan_result = perform_scan(scan_type)
-            scanning = False
-            print(scan_result)
-            mqtt_handler.publish_entity_state(
-                entities["scanner_status"], scan_result)
+        def callback(client, userdata, message):
+            def scan_task():
+                nonlocal scanning
+                mqtt_handler.publish_entity_state(
+                    entities["scanner_status"], f"Scanning {scan_type}...")
+                logger.info(
+                    f"Received '{message.payload.decode()}' for '{scan_type}'")
+                scanning = True
+                scan_result = perform_scan(scan_type)
+                scanning = False
+                logger.info(scan_result)
+                mqtt_handler.publish_entity_state(
+                    entities["scanner_status"], scan_result)
+
+            # Run the scan task in a separate thread
+            threading.Thread(target=scan_task).start()
         return callback
 
     # Register callbacks for each scan button
@@ -197,16 +220,68 @@ def main():
                 start_scanbd()
                 mqtt_handler.publish_entity_state(
                     entities["scanner_online"], BinarySensor.STATE_ON)
+                mqtt_handler.publish_entity_state(
+                    entities["scanner_status"], "Ready")
 
             if not is_device_connected and is_service_running:
                 stop_scanbd()
                 mqtt_handler.publish_entity_state(
                     entities["scanner_online"], BinarySensor.STATE_OFF)
+                mqtt_handler.publish_entity_state(
+                    entities["scanner_status"], "Scanner disconnected")
 
             if not was_device_connected and is_device_connected:
                 logger.info(
                     "USB state changed from disconnected to connected, restarting Docker container.")
-                restart_docker(None)
+                restart_docker()
+
+            # if last.pdf changed, convert to image
+            if os.path.exists(PDF_PATH) and os.path.getmtime(PDF_PATH) != last_pdf_time:
+                logger.info("PDF file changed, converting to image.")
+                last_pdf_time = os.path.getmtime(PDF_PATH)
+                pages = convert_from_path(PDF_PATH, dpi=200)
+                # Calculate grid dimensions to make it as square as possible
+                num_pages = len(pages)
+                cols = math.ceil(math.sqrt(num_pages))  # Number of columns
+                rows = math.ceil(num_pages / cols)      # Number of rows
+
+                # Determine the cell size by finding the maximum width and height of each page
+                cell_width = max(page.width for page in pages)
+                cell_height = max(page.height for page in pages)
+
+                # Calculate the size of the full grid image
+                grid_width = cell_width * cols
+                grid_height = cell_height * rows
+
+                # Create a blank canvas for the grid
+                combined_image = Image.new(
+                    'RGB', (grid_width, grid_height), color=(0, 0, 0))
+
+                # Paste each page into the grid
+                for index, page in enumerate(pages):
+                    row = index // cols
+                    col = index % cols
+
+                    # Resize page to fit within the cell, maintaining aspect ratio
+                    page.thumbnail((cell_width, cell_height))
+
+                    # Calculate x and y position to paste the page in the grid
+                    x = col * cell_width + (cell_width - page.width) // 2
+                    y = row * cell_height + (cell_height - page.height) // 2
+                    combined_image.paste(page, (x, y))
+
+                # shrink image uniformly if it's too big
+                max_dimension = max(grid_width, grid_height)
+                if max_dimension > 2048:
+                    combined_image.thumbnail((2048, 2048))
+
+                with BytesIO() as img_buffer:
+                    combined_image.save(img_buffer, format="JPEG")
+                    img_bytes = img_buffer.getvalue()
+                    mqtt_handler.publish_entity_state(
+                        entities["scanner_preview"], img_bytes)
+
+                    logger.info("Sent combined image grid to Home Assistant.")
 
             was_device_connected = is_device_connected
             time.sleep(5)
@@ -217,7 +292,7 @@ def main():
         mqtt_handler.deregister_device(device)
         mqtt_handler.disconnect()
         logger.debug("MQTT client stopped.")
-        print("MQTT client stopped.")
+        logger.info("MQTT client stopped.")
 
 
 if __name__ == "__main__":

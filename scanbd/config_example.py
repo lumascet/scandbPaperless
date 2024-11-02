@@ -1,9 +1,5 @@
 MQTT_SERVER_HOST = "example.com"
 MQTT_SERVER_PORT = 1883
-MQTT_BIND_ADDRESS = "0.0.0.0"
-MQTT_BIND_PORT = 1883
 MQTT_USERNAME = "example_user"
 MQTT_PASSWORD = "example_password"
-MQTT_TRANSPORT = "tcp"
-MQTT_KEEPALIVE = 60
-MQTT_CLIENT_ID = "example_client_id"
+MQTT_KEEPALIVE = 300

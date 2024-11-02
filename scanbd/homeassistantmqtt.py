@@ -17,6 +17,7 @@ class HomeAssistantEntity:
         self.entity_id = name.replace(" ", "_").lower()
         self.entity_category = entity_category
         self.device = None  # Device will be set when added to a device
+        self.availability_objects = []
 
     def get_status_topic(self):
         return f"{self.device.device_id}/status"
@@ -30,6 +31,9 @@ class HomeAssistantEntity:
     def get_state_payload(self, data):
         return json.dumps({"value": data})
 
+    def add_availability(self, availability):
+        self.availability_objects.append(availability)
+
     def get_config(self):
         config = {
             "name": self.name,
@@ -42,12 +46,18 @@ class HomeAssistantEntity:
                 "model": self.device.model,
                 "sw_version": self.device.sw_version,
             },
-            "availability": {
-                "topic": self.get_status_topic(),
-                "payload_available": "online",
-                "payload_not_available": "offline",
-            },
+            "availability": [
+                {
+                    "topic": self.get_status_topic(),
+                    "payload_available": "online",
+                    "payload_not_available": "offline",
+                }
+            ],
+            "availability_mode": "all",
+
         }
+        if self.availability_objects:
+            config["availability"].extend(self.availability_objects)
         if self.icon:
             config["icon"] = self.icon
         if self.entity_category:
@@ -127,6 +137,26 @@ class BinarySensor(HomeAssistantEntity):
         return config
 
 
+class Image(HomeAssistantEntity):
+    """Represents an Image entity."""
+
+    def __init__(self, name, content_type, icon=None, entity_category=None):
+        super().__init__(name, "image", icon, entity_category)
+        self.content_type = content_type
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "image_topic": self.get_state_topic(),
+            "content_type": self.content_type,
+        })
+        return config
+
+    def get_state_payload(self, data):
+        """Override to handle binary encoded JPG data."""
+        return data
+
+
 class HomeAssistantDevice:
     """Represents a device in Home Assistant."""
 
@@ -138,7 +168,7 @@ class HomeAssistantDevice:
         self.configuration_url = configuration_url
         self.ha_prefix = ha_prefix
         self.sw_version = sw_version
-        self.entities = []  # Add entities list
+        self.entities = []
 
     def add_entity(self, entity):
         """Add an entity to the device."""
@@ -149,27 +179,22 @@ class HomeAssistantDevice:
 class MQTTHandler:
     """Handles MQTT communication."""
 
-    def __init__(self, broker, port=1883, username='', password='', keepalive=60):
+    def __init__(self, broker, port=1883, username='', password='', keepalive=60, debug=False):
+        self.debug = debug
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         if username and password:
             self.client.username_pw_set(username, password)
-        self.client.on_message = self._on_message
-        self.callbacks = {}
         self.keepalive = keepalive
         self.broker = broker
         self.port = port
-
-    def _on_message(self, client, userdata, msg):
-        topic = msg.topic
-        payload = msg.payload.decode()
-        logger.info("Received message on topic %s: %s", topic, payload)
-        if topic in self.callbacks:
-            self.callbacks[topic](payload)
+        self.devices = []
 
     def connect(self):
         try:
-            logger.info("Connecting to MQTT broker at %s:%s", self.broker, self.port)
+            logger.info("Connecting to MQTT broker at %s:%s",
+                        self.broker, self.port)
             self.client.connect(self.broker, self.port, self.keepalive)
+            self.client.subscribe("+/control/#")
             self.client.loop_start()
             logger.info("MQTT client loop started")
         except Exception as e:
@@ -189,18 +214,23 @@ class MQTTHandler:
         lwt_topic = f"{device.device_id}/status"
         lwt_payload = "offline"
         self.client.will_set(lwt_topic, lwt_payload, retain=True)
+        self.devices.append(device)
 
     def deregister_device(self, device):
         logger.info("Deregistering device %s", device.name)
         self.set_device_offline(device)
+        self.devices.remove(device)
 
     def register_callback(self, topic, callback):
         logger.info("Registering callback for topic %s", topic)
+        self.client.message_callback_add(topic, callback)
         self.client.subscribe(topic)
-        self.callbacks[topic] = callback
 
     def publish(self, topic, payload, retain=False):
-        logger.info("Publishing to topic %s: %s", topic, payload)
+        if self.debug:
+            logger.info("Publishing to topic %s: %s", topic, payload)
+        else:
+            logger.info("Publishing to topic %s", topic)
         self.client.publish(topic, payload, retain=retain)
 
     def publish_ha_autoconfig(self, device):
