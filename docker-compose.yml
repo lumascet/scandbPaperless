@@ -15,8 +15,8 @@ services:
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: paperless
 
-  scannerless:
-    hostname: scannerless
+  scannerful:
+    hostname: scannerful
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     restart: unless-stopped
     user: '1000:1000'
@@ -52,9 +52,9 @@ services:
       - netstackbridge
     labels:
       ofelia.enabled: "true"
-      ofelia.job-exec.scannerless.schedule:  "0 0 4 * * WED"
-      ofelia.job-exec.scannerless.user: "paperless"
-      ofelia.job-exec.scannerless.command: "document_exporter ../backup/ -f"
+      ofelia.job-exec.scannerful.schedule:  "0 0 4 * * WED"
+      ofelia.job-exec.scannerful.user: "paperless"
+      ofelia.job-exec.scannerful.command: "document_exporter ../backup/ -f"
 
   backup:
     image: adrienpoupa/rclone-backup:latest
@@ -95,7 +95,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command: daemon --docker
     depends_on:
-      scannerless:
+      scannerful:
         condition: service_healthy
     restart: unless-stopped
 
