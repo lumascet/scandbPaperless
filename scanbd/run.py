@@ -2,10 +2,11 @@ from config import *
 import time
 import subprocess
 from homeassistantmqtt import BinarySensor, Button, HomeAssistantDevice, MQTTHandler, Sensor
-
+import logging
 
 # Constants for the scanner device
-DEVICE_ID = "04c5:11a2"
+DEVICE_USB_ID = "04c5:11a2"
+DEVICE_ID = "fujitsu_scanner"
 DEVICE_NAME = "fujitsu:ScanSnap S1500:7920"
 MANUFACTURER = "Fujitsu"
 MODEL = "ScanSnap S1500"
@@ -18,9 +19,14 @@ SCANBD_COMMAND = "/usr/sbin/scanbd -f -d -c /etc/scanbd/scanbd.conf"
 SCAN_SCRIPT_PATH = "/etc/scanbd/scripts"
 SCAN_SCRIPT = "./scan.script"
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+
 def find_scanner():
     result = subprocess.run(['lsusb'], capture_output=True, text=True)
-    return DEVICE_ID in result.stdout
+    return DEVICE_USB_ID in result.stdout
 
 
 def poll_scanner():
@@ -40,7 +46,7 @@ def start_scanbd():
 
 def stop_scanbd():
     if is_process_running(PROCESS_NAME):
-        subprocess.run(['pkill', '-f', PROCESS_NAME])
+        subprocess.run(['pkill', PROCESS_NAME])
         print("Scanner service stopped.")
         return True
     print("Scanner service not running.")
@@ -49,7 +55,7 @@ def stop_scanbd():
 
 def is_process_running(process_name):
     try:
-        subprocess.check_output(['pgrep', '-f', process_name])
+        subprocess.check_output(['pgrep', process_name])
         return True
     except subprocess.CalledProcessError:
         return False
@@ -69,10 +75,22 @@ def perform_scan(scan_type):
         start_scanbd()
         if result.returncode == 0:
             return "Scan successful"
+        elif result.returncode == 1:
+            return "Scanner not found"
+        elif result.returncode == 2:
+            return "Invalid option"
+        elif result.returncode == 3:
+            return "Invalid argument"
+        elif result.returncode == 4:
+            return "I/O error"
+        elif result.returncode == 5:
+            return "Out of memory"
         elif result.returncode == 6:
             return "Scanner jammed"
         elif result.returncode == 7:
             return "Out of documents"
+        elif result.returncode == 8:
+            return "Scanner cover open"
         else:
             return f"scanimage command failed with exit status {result.returncode}"
     except Exception as e:
@@ -81,12 +99,15 @@ def perform_scan(scan_type):
 
 def main():
     program_exit = False
+    was_device_connected = True
+    scanning = False
 
     # MQTT broker settings from config
     MQTT_BROKER = mqtt_server_host
     MQTT_PORT = mqtt_server_port
     MQTT_USER = mqtt_username
     MQTT_PASSWORD = mqtt_password
+    MQTT_KEEPALIVE = 300
 
     # Initialize the device using properties from the top
     device = HomeAssistantDevice(
@@ -98,7 +119,7 @@ def main():
         configuration_url=CONFIGURATION_URL
     )
 
-    # Add entities to the device
+    # Create entities without passing the device
     scan_buttons = {
         "color_a4": Button("A4 Color", icon="mdi:palette"),
         "greyscale_a4": Button("A4 Greyscale", icon="mdi:invert-colors-off"),
@@ -110,27 +131,29 @@ def main():
 
     entities = {
         "restart_docker": Button("Restart Docker", icon="mdi:restart", entity_category="diagnostic"),
-        "scanner_status": Sensor("Scanner Status", icon="mdi:printer-wireless"),
-        "scanner_online": BinarySensor("Scanner Online", icon="mdi:printer-wireless"),
+        "scanner_status": Sensor("Scanner Status", icon="mdi:printer-alert"),
+        "scanner_online": BinarySensor("Scanner Online", icon="mdi:printer-check"),
     }
 
+    # Add entities to the device
     for button in scan_buttons.values():
         device.add_entity(button)
 
     for entity in entities.values():
         device.add_entity(entity)
 
-    # Initialize MQTT handler
+    # Initialize MQTT handler and register device
     mqtt_handler = MQTTHandler(
         broker=MQTT_BROKER,
         port=MQTT_PORT,
         username=MQTT_USER,
-        password=MQTT_PASSWORD
+        password=MQTT_PASSWORD,
+        keepalive=MQTT_KEEPALIVE
     )
 
-    # Start MQTT handler
-    mqtt_handler.start()
-    mqtt_handler.publish_device_config(device)
+    mqtt_handler.register_device(device)
+    mqtt_handler.connect()
+    mqtt_handler.publish_ha_autoconfig(device)
     mqtt_handler.set_device_online(device)
 
     def restart_docker(payload):
@@ -138,8 +161,8 @@ def main():
         nonlocal program_exit
         program_exit = True
 
+    # Register entity callbacks
     mqtt_handler.register_entity_callback(
-        device,
         entities["restart_docker"],
         restart_docker
     )
@@ -147,19 +170,19 @@ def main():
     # Define the scan callback function
     def make_scan_callback(scan_type):
         def callback(payload):
-            mqtt_handler.publish_entity_state(
-                device, entities["scanner_status"], "Scanning")
             print(f"Received '{payload}' for '{scan_type}'")
+            nonlocal scanning
+            scanning = True
             scan_result = perform_scan(scan_type)
+            scanning = False
             print(scan_result)
             mqtt_handler.publish_entity_state(
-                device, entities["scanner_status"], scan_result)
+                entities["scanner_status"], scan_result)
         return callback
 
-    # Register callbacks for each entity
+    # Register callbacks for each scan button
     for key, button in scan_buttons.items():
         mqtt_handler.register_entity_callback(
-            device,
             button,
             make_scan_callback(key)
         )
@@ -170,22 +193,30 @@ def main():
             is_device_connected = find_scanner()
             is_service_running = is_process_running(PROCESS_NAME)
 
-            if is_device_connected and not is_service_running:
-                mqtt_handler.publish_entity_state(
-                    device, entities["scanner_online"], BinarySensor.STATE_ON)
+            if is_device_connected and not is_service_running and not scanning:
                 start_scanbd()
+                mqtt_handler.publish_entity_state(
+                    entities["scanner_online"], BinarySensor.STATE_ON)
 
             if not is_device_connected and is_service_running:
                 stop_scanbd()
                 mqtt_handler.publish_entity_state(
-                    device, entities["scanner_online"], BinarySensor.STATE_OFF)
+                    entities["scanner_online"], BinarySensor.STATE_OFF)
+
+            if not was_device_connected and is_device_connected:
+                logger.info(
+                    "USB state changed from disconnected to connected, restarting Docker container.")
+                restart_docker(None)
+
+            was_device_connected = is_device_connected
             time.sleep(5)
     except KeyboardInterrupt:
         program_exit = True
     finally:
-        # Set device offline
-        mqtt_handler.set_device_offline(device)
-        mqtt_handler.stop()
+        # Deregister device and stop MQTT handler
+        mqtt_handler.deregister_device(device)
+        mqtt_handler.disconnect()
+        logger.debug("MQTT client stopped.")
         print("MQTT client stopped.")
 
 
