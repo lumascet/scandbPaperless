@@ -58,6 +58,7 @@ services:
 
   backup:
     image: adrienpoupa/rclone-backup:latest
+    restart: unless-stopped
     environment:
       RCLONE_REMOTE_NAME: 'RcloneBackup'
       RCLONE_REMOTE_DIR: ${RCLONE_REMOTE_DIR}

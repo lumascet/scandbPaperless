@@ -33,6 +33,6 @@ COPY scripts /etc/scanbd/scripts
 COPY scanbd/config.py /config.py
 COPY scanbd/homeassistantmqtt.py /homeassistantmqtt.py
 COPY scanbd/run.py /run.py
-HEALTHCHECK --interval=30s --timeout=30s --start-period=1s --retries=3 CMD [ "pgrep", "-x", "scanbd" ]
+HEALTHCHECK --interval=30s --timeout=30s --start-period=1s --retries=3 CMD [ "pgrep", "-x", "python3" ]
 
 ENTRYPOINT [ "python3","-u", "run.py" ]
