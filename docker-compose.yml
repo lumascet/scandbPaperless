@@ -71,12 +71,14 @@ services:
       BACKUP_FILE_SUFFIX: '%Y-%m-%d_%H-%M-%S'
       BACKUP_KEEP_DAYS: 30
       MAIL_SMTP_ENABLE: 'TRUE'
-      MAIL_SMTP_VARIABLES: |
-        -S v15-compat
-        -S smtp-use-starttls
-        -S smtp-auth=login
-        -S mta=smtp://${SMTP_SENDER_LOGIN}:${SMTP_SENDER_PASSWORD}@${SMTP_SERVER}
-        -S from=${SMTP_SENDER_EMAIL}
+      MAIL_SMTP_VARIABLES: >-
+        -S 'v15-compat'
+        -S 'mta=smtp://${SMTP_SERVER}'
+        -S 'smtp-use-starttls'
+        -S 'smtp-auth=login'
+        -S 'user=${SMTP_SENDER_EMAIL}'
+        -S 'password=${SMTP_SENDER_PASSWORD}'
+        -S 'from=Paperless Backup <$SMTP_SENDER_EMAIL>'
       MAIL_TO: ${SMTP_RECEIVER_EMAIL}
       TIMEZONE: 'Europe/Vienna'
     volumes:
